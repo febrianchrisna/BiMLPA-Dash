@@ -4,7 +4,6 @@ from collections import Counter
 from math import sqrt
 from random import choice
 import argparse
-import time
 import generator  # untuk memuat graf dari file
 
 
@@ -15,19 +14,6 @@ class BiMLPA(object):
         self.max_prop_label = max_prop_label
         self.max_MM_iter = max_MM_iter
         self.max_MS_iter = max_MS_iter
-        
-        # Tracking metrics
-        self.history = {
-            'mm_iterations': 0,
-            'ms_iterations': 0,
-            'total_time': 0.0,
-            'mm_time': 0.0,
-            'ms_time': 0.0,
-            'modularity_history': [],  # List of (iteration, phase, modularity)
-            'time_history': [],  # List of (iteration, phase, cumulative_time)
-            'mm_converged': False,  # Did MM phase converge early?
-            'ms_converged': False   # Did MS phase converge early?
-        }
 
     def _initialize(self):
         G = self.G
@@ -114,81 +100,25 @@ class BiMLPA(object):
         return convergence
 
     def _multi_multi_LP(self):
-        # Multi Multi LP with tracking - TRACK EVERY ITERATION
-        start_time = time.time()
-        
-        for iteration in range(self.max_MM_iter):
+        # Multi Multi LP
+        for _ in range(self.max_MM_iter):
             conv_blue = self._propagate_multi_labels(self.blue)
             conv_red  = self._propagate_multi_labels(self.red)
-            
-            self.history['mm_iterations'] = iteration + 1
-            
-            # Track EVERY iteration for better visualization
-            try:
-                node_labels, communities = _labels_to_partition(self.G)
-                if communities:
-                    community_mapping = {}
-                    for idx, comm in enumerate(communities, start=1):
-                        for node in comm:
-                            community_mapping[node] = idx
-                    
-                    # Import here to avoid circular dependency
-                    from modularity import calculate_murata_modularity
-                    mod = calculate_murata_modularity(self.G, community_mapping)
-                    elapsed = time.time() - start_time
-                    self.history['modularity_history'].append((iteration + 1, 'MM', mod))
-                    self.history['time_history'].append((iteration + 1, 'MM', elapsed))
-            except Exception as e:
-                pass  # Skip if modularity calculation fails
-            
             if conv_blue and conv_red:
-                self.history['mm_converged'] = True
                 break
-        
-        self.history['mm_time'] = time.time() - start_time
 
     def _multi_single_LP(self):
-        # Multi Single LP with tracking - TRACK EVERY ITERATION
-        start_time = time.time()
-        mm_offset = self.history['mm_iterations']
-        
-        for iteration in range(self.max_MS_iter):
+        # Multi Single LP
+        for _ in range(self.max_MS_iter):
             conv_blue = self._propagate_multi_labels(self.blue)
             conv_red  = self._propagate_single_label(self.red)
-            
-            self.history['ms_iterations'] = iteration + 1
-            
-            # Track EVERY iteration for better visualization
-            try:
-                node_labels, communities = _labels_to_partition(self.G)
-                if communities:
-                    community_mapping = {}
-                    for idx, comm in enumerate(communities, start=1):
-                        for node in comm:
-                            community_mapping[node] = idx
-                    
-                    from modularity import calculate_murata_modularity
-                    mod = calculate_murata_modularity(self.G, community_mapping)
-                    elapsed = self.history['mm_time'] + (time.time() - start_time)
-                    self.history['modularity_history'].append((mm_offset + iteration + 1, 'MS', mod))
-                    self.history['time_history'].append((mm_offset + iteration + 1, 'MS', elapsed))
-            except:
-                pass
-            
             if conv_blue and conv_red:
-                self.history['ms_converged'] = True
                 break
-        
-        self.history['ms_time'] = time.time() - start_time
 
     def start(self):
-        overall_start = time.time()
         self._initialize()
         self._multi_multi_LP()
         self._multi_single_LP()
-        self.history['total_time'] = time.time() - overall_start
-        
-        return self.history
 
 
 class BiMLPA_SqrtDeg(BiMLPA):

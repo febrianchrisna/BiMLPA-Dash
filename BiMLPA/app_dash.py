@@ -155,8 +155,7 @@ app_data = {
     'graph': None,
     'communities_sorted': None,
     'node_labels': None,
-    'full_table_data': None,
-    'bimlpa_history': None  # Add history tracking
+    'full_table_data': None  # Add this to store non-truncated data for download
 }
 
 def generate_bipartite_from_t2dm(file_path: str):
@@ -500,6 +499,15 @@ def get_layout():
                         "Parameter"
                     ], className="fw-bold"),
                     dbc.CardBody([
+                        html.Label("Maks iterasi", className="form-label"),
+                        dcc.Slider(
+                            id='max-iters-slider',
+                            min=1, max=200, step=1, value=50,
+                            marks={1: '1', 50: '50', 100: '100', 200: '200'},
+                            tooltip={"placement": "bottom", "always_visible": True},
+                            className="mb-4"
+                        ),
+                        
                         html.Label("Threshold (BiMLPA)", className="form-label"),
                         dcc.Slider(
                             id='threshold-slider',
@@ -595,46 +603,13 @@ def get_layout():
                 
                 # Results container
                 html.Div([
-                    # Runtime Summary Card
-                    dbc.Card([
-                        dbc.CardHeader([
-                            html.I(className="fas fa-clock me-2 text-primary"),
-                            "Runtime Summary"
-                        ], className="fw-bold"),
-                        dbc.CardBody([
-                            html.Div(id="runtime-output")
-                        ])
-                    ], className="mb-4 shadow-sm"),
-                    
-                    # Modularity Progression Chart - SEPARATE
-                    dbc.Card([
-                        dbc.CardHeader([
-                            html.I(className="fas fa-chart-line me-2 text-primary"),
-                            "Modularity Progression"
-                        ], className="fw-bold"),
-                        dbc.CardBody([
-                            dcc.Graph(id="modularity-progression-chart", style={"height": "350px"})
-                        ])
-                    ], className="mb-4 shadow-sm"),
-                    
-                    # Execution Time Chart - SEPARATE
-                    dbc.Card([
-                        dbc.CardHeader([
-                            html.I(className="fas fa-stopwatch me-2 text-primary"),
-                            "Execution Time Progression"
-                        ], className="fw-bold"),
-                        dbc.CardBody([
-                            dcc.Graph(id="execution-time-chart", style={"height": "350px"})
-                        ])
-                    ], className="mb-4 shadow-sm"),
-                    
                     dbc.Card([
                         dbc.CardHeader([
                             html.I(className="fas fa-project-diagram me-2 text-primary"),
                             "Hasil Komunitas"
                         ], className="fw-bold"),
                         dbc.CardBody(
-                            html.Div(id="communities-output")
+                            html.Div(id="communities-output")  # Remove spinner
                         )
                     ], className="mb-4 shadow-sm"),
                     
@@ -897,9 +872,6 @@ def update_visualization_mode(viz_mode, selected_community, limit_nodes, max_nod
 @app.callback(
     [Output('results-container', 'style'),
      Output('graph-summary-container', 'children'),
-     Output('runtime-output', 'children'),
-     Output('modularity-progression-chart', 'figure'),
-     Output('execution-time-chart', 'figure'),  # NEW separate chart
      Output('communities-output', 'children'),
      Output('graph-visualization', 'figure'),
      Output('visualization-warnings', 'children'),
@@ -910,7 +882,7 @@ def update_visualization_mode(viz_mode, selected_community, limit_nodes, max_nod
     [Input('run-button', 'n_clicks')],
     [State('upload-data', 'contents'),
      State('upload-data', 'filename'),
-     # REMOVED: State('max-iters-slider', 'value') - no longer needed
+     State('max-iters-slider', 'value'),
      State('threshold-slider', 'value'),
      State('max-prop-input', 'value'),
      State('max-mm-input', 'value'),
@@ -921,17 +893,19 @@ def update_visualization_mode(viz_mode, selected_community, limit_nodes, max_nod
      State('limit-nodes', 'value')],
     prevent_initial_call=True,
     running=[
+        # Show loading indicator on button while callback is running
         (Output('run-button', 'disabled'), True, False),
+        # Show loading overlay on results while callback is running
         (Output('results-container', 'className'), 'loading', '')
     ]
 )
-def run_bimlpa(n_clicks, contents, filename, threshold, 
+def run_bimlpa(n_clicks, contents, filename, max_iters, threshold, 
                max_prop, max_mm, max_ms, max_nodes_per_side, show_labels, node_size, limit_nodes):
     if n_clicks is None or contents is None:
         empty_fig = go.Figure()
-        return {'display': 'none'}, None, None, empty_fig, empty_fig, None, empty_fig, None, None, [], [], []
+        return {'display': 'none'}, None, None, empty_fig, None, None, [], [], []
     
-    # Validate file extension
+    # Validate file extension - now accepts CSV, TSV, and TXT
     valid_extensions = ['.csv', '.tsv', '.txt']
     if not any(filename.lower().endswith(ext) for ext in valid_extensions):
         empty_fig = go.Figure()
@@ -941,7 +915,7 @@ def run_bimlpa(n_clicks, contents, filename, threshold,
             html.Hr(),
             html.P("Harap upload file dengan format CSV (.csv), TSV (.tsv), atau TXT (.txt)", className="mb-0")
         ], color="danger")
-        return {'display': 'none'}, error_message, None, empty_fig, empty_fig, None, empty_fig, None, None, [], [], []
+        return {'display': 'none'}, error_message, None, empty_fig, None, None, [], [], []
     
     # Decode and save uploaded content
     try:
@@ -955,11 +929,12 @@ def run_bimlpa(n_clicks, contents, filename, threshold,
             html.Hr(),
             html.P("File mungkin corrupt atau tidak dalam format yang benar.", className="mb-0")
         ], color="danger")
-        return {'display': 'none'}, error_message, None, empty_fig, empty_fig, None, empty_fig, None, None, [], [], []
+        return {'display': 'none'}, error_message, None, empty_fig, None, None, [], [], []
     
-    # Create temp file
+    # Create temp file to store the data - preserve original extension
     path = None
     try:
+        # Get file extension
         file_ext = os.path.splitext(filename)[1] if '.' in filename else '.csv'
         with tempfile.NamedTemporaryFile(delete=False, suffix=file_ext, mode='wb') as tmp:
             tmp.write(decoded)
@@ -970,13 +945,14 @@ def run_bimlpa(n_clicks, contents, filename, threshold,
             html.H5("Gagal Menyimpan File Sementara", className="alert-heading"),
             html.P(f"Error: {str(e)}"),
         ], color="danger")
-        return {'display': 'none'}, error_message, None, empty_fig, empty_fig, None, empty_fig, None, None, [], [], []
+        return {'display': 'none'}, error_message, None, empty_fig, None, None, [], [], []
     
     try:
-        # Load graph
+        # Load graph from T2DM file (CSV/TSV/TXT)
         try:
             G = generate_bipartite_from_t2dm(path)
         except ValueError as e:
+            # Specific validation errors from generate_bipartite_from_t2dm
             empty_fig = go.Figure()
             error_message = dbc.Alert([
                 html.H5("Error Validasi Data", className="alert-heading"),
@@ -995,8 +971,9 @@ def run_bimlpa(n_clicks, contents, filename, threshold,
             ], color="danger")
             if path and os.path.exists(path):
                 os.unlink(path)
-            return {'display': 'none'}, error_message, None, empty_fig, empty_fig, None, empty_fig, None, None, [], [], []
+            return {'display': 'none'}, error_message, None, empty_fig, None, None, [], [], []
         except Exception as e:
+            # Unexpected errors during graph generation
             empty_fig = go.Figure()
             error_message = dbc.Alert([
                 html.H5("Error Tidak Terduga", className="alert-heading"),
@@ -1006,13 +983,13 @@ def run_bimlpa(n_clicks, contents, filename, threshold,
             ], color="danger")
             if path and os.path.exists(path):
                 os.unlink(path)
-            return {'display': 'none'}, error_message, None, empty_fig, empty_fig, None, empty_fig, None, None, [], [], []
+            return {'display': 'none'}, error_message, None, empty_fig, None, None, [], [], []
             
         # Clean up temp file
         if path and os.path.exists(path):
             os.unlink(path)
         
-        # Validate graph
+        # Validate graph has sufficient data
         if G.number_of_nodes() < 2:
             empty_fig = go.Figure()
             error_message = dbc.Alert([
@@ -1021,7 +998,7 @@ def run_bimlpa(n_clicks, contents, filename, threshold,
                 html.Hr(),
                 html.P("Diperlukan minimal 2 node untuk analisis komunitas.", className="mb-0")
             ], color="warning")
-            return {'display': 'none'}, error_message, None, empty_fig, empty_fig, None, empty_fig, None, None, [], [], []
+            return {'display': 'none'}, error_message, None, empty_fig, None, None, [], [], []
         
         if G.number_of_edges() < 1:
             empty_fig = go.Figure()
@@ -1031,7 +1008,7 @@ def run_bimlpa(n_clicks, contents, filename, threshold,
                 html.Hr(),
                 html.P("Diperlukan minimal 1 edge untuk analisis komunitas.", className="mb-0")
             ], color="warning")
-            return {'display': 'none'}, error_message, None, empty_fig, empty_fig, None, empty_fig, None, None, [], [], []
+            return {'display': 'none'}, error_message, None, empty_fig, None, None, [], [], []
         
         # Backup 'label' to 'display' if needed
         for n, data in G.nodes(data=True):
@@ -1063,14 +1040,11 @@ def run_bimlpa(n_clicks, contents, filename, threshold,
             ])
         ], className="mb-4 shadow-sm")
         
-        # Run BiMLPA with history tracking
+        # Run BiMLPA - hapus semua yang terkait seed
         try:
+            # Always use sqrtdeg variant tanpa seed
             algo = BiMLPA_SqrtDeg(G, threshold, int(max_prop), int(max_mm), int(max_ms))
-            history = algo.start()  # Now returns history
-            
-            # Store history
-            app_data['bimlpa_history'] = history
-            
+            algo.start()
         except Exception as e:
             empty_fig = go.Figure()
             error_message = dbc.Alert([
@@ -1079,233 +1053,7 @@ def run_bimlpa(n_clicks, contents, filename, threshold,
                 html.Hr(),
                 html.P("Coba sesuaikan parameter atau periksa data input.", className="mb-0")
             ], color="danger")
-            return {'display': 'none'}, graph_summary, None, empty_fig, empty_fig, error_message, empty_fig, None, None, [], [], []
-        
-        # Create runtime display
-        runtime_display = dbc.Row([
-            dbc.Col([
-                html.Div([
-                    html.I(className="fas fa-hourglass-half me-2 text-primary"),
-                    html.Strong("Total Runtime:")
-                ]),
-                html.H5(f"{history['total_time']:.3f}s", className="text-primary")
-            ], width=3),
-            dbc.Col([
-                html.Div([
-                    html.I(className="fas fa-sync me-2 text-info"),
-                    html.Strong("MM Phase:")
-                ]),
-                html.P(f"{history['mm_iterations']} iterations ({history['mm_time']:.3f}s)", className="mb-0")
-            ], width=3),
-            dbc.Col([
-                html.Div([
-                    html.I(className="fas fa-sync me-2 text-success"),
-                    html.Strong("MS Phase:")
-                ]),
-                html.P(f"{history['ms_iterations']} iterations ({history['ms_time']:.3f}s)", className="mb-0")
-            ], width=3),
-            dbc.Col([
-                html.Div([
-                    html.I(className="fas fa-layer-group me-2 text-warning"),
-                    html.Strong("Total Iterations:")
-                ]),
-                html.H5(f"{history['mm_iterations'] + history['ms_iterations']}", className="text-warning")
-            ], width=3)
-        ], className="align-items-center")
-        
-        # Create SEPARATE modularity progression chart
-        if history['modularity_history']:
-            mod_fig = go.Figure()
-            
-            # Separate MM and MS data
-            mm_data = [(iter, mod) for iter, phase, mod in history['modularity_history'] if phase == 'MM']
-            ms_data = [(iter, mod) for iter, phase, mod in history['modularity_history'] if phase == 'MS']
-            
-            if mm_data:
-                mm_iters, mm_mods = zip(*mm_data)
-                mod_fig.add_trace(go.Scatter(
-                    x=mm_iters, y=mm_mods,
-                    mode='lines+markers',
-                    name=f'Multi-Multi Phase ({len(mm_data)} iter)',
-                    line=dict(color='#4361EE', width=2),
-                    marker=dict(size=8)
-                ))
-            
-            if ms_data:
-                ms_iters, ms_mods = zip(*ms_data)
-                mod_fig.add_trace(go.Scatter(
-                    x=ms_iters, y=ms_mods,
-                    mode='lines+markers',
-                    name=f'Multi-Single Phase ({len(ms_data)} iter)',
-                    line=dict(color='#F72585', width=2),
-                    marker=dict(size=8)
-                ))
-            
-            # Add phase separator line
-            if mm_data and ms_data:
-                mod_fig.add_vline(
-                    x=history['mm_iterations'], 
-                    line_dash="dash", 
-                    line_color="gray",
-                    annotation_text="Phase Transition",
-                    annotation_position="top"
-                )
-            
-            # Add convergence annotations
-            annotations = []
-            if history.get('mm_converged'):
-                annotations.append(dict(
-                    x=history['mm_iterations'],
-                    y=mm_mods[-1] if mm_data else 0,
-                    text="MM Converged ✓",
-                    showarrow=True,
-                    arrowhead=2,
-                    ax=0,
-                    ay=-40,
-                    bgcolor="rgba(67, 97, 238, 0.8)",
-                    font=dict(color="white", size=10)
-                ))
-            
-            if history.get('ms_converged'):
-                total_iters = history['mm_iterations'] + history['ms_iterations']
-                annotations.append(dict(
-                    x=total_iters,
-                    y=ms_mods[-1] if ms_data else 0,
-                    text="MS Converged ✓",
-                    showarrow=True,
-                    arrowhead=2,
-                    ax=0,
-                    ay=-40,
-                    bgcolor="rgba(247, 37, 133, 0.8)",
-                    font=dict(color="white", size=10)
-                ))
-            
-            mod_fig.update_layout(
-                xaxis_title="Iteration",
-                yaxis_title="Murata Modularity (Q_B)",
-                hovermode='x unified',
-                plot_bgcolor='white',
-                paper_bgcolor='white',
-                font=dict(family="Poppins, sans-serif"),
-                margin=dict(l=50, r=20, t=20, b=40),
-                showlegend=True,
-                legend=dict(
-                    orientation="h",
-                    yanchor="bottom",
-                    y=1.02,
-                    xanchor="right",
-                    x=1
-                ),
-                annotations=annotations
-            )
-            mod_fig.update_xaxes(showgrid=True, gridcolor='#f0f0f0')
-            mod_fig.update_yaxes(showgrid=True, gridcolor='#f0f0f0')
-        else:
-            mod_fig = go.Figure()
-            mod_fig.add_annotation(
-                text="Modularity tracking data not available",
-                xref="paper", yref="paper",
-                x=0.5, y=0.5, showarrow=False
-            )
-        
-        # Create SEPARATE execution time chart
-        if history['time_history']:
-            time_fig = go.Figure()
-            
-            # Separate MM and MS data
-            mm_time_data = [(iter, time) for iter, phase, time in history['time_history'] if phase == 'MM']
-            ms_time_data = [(iter, time) for iter, phase, time in history['time_history'] if phase == 'MS']
-            
-            if mm_time_data:
-                mm_iters, mm_times = zip(*mm_time_data)
-                time_fig.add_trace(go.Scatter(
-                    x=mm_iters, y=mm_times,
-                    mode='lines+markers',
-                    name=f'Multi-Multi Phase ({len(mm_time_data)} iter)',
-                    line=dict(color='#4361EE', width=2),
-                    marker=dict(size=8),
-                    fill='tozeroy',
-                    fillcolor='rgba(67, 97, 238, 0.1)'
-                ))
-            
-            if ms_time_data:
-                ms_iters, ms_times = zip(*ms_time_data)
-                time_fig.add_trace(go.Scatter(
-                    x=ms_iters, y=ms_times,
-                    mode='lines+markers',
-                    name=f'Multi-Single Phase ({len(ms_time_data)} iter)',
-                    line=dict(color='#F72585', width=2),
-                    marker=dict(size=8),
-                    fill='tonexty',
-                    fillcolor='rgba(247, 37, 133, 0.1)'
-                ))
-            
-            # Add phase separator line
-            if mm_time_data and ms_time_data:
-                time_fig.add_vline(
-                    x=history['mm_iterations'], 
-                    line_dash="dash", 
-                    line_color="gray",
-                    annotation_text="Phase Transition",
-                    annotation_position="top"
-                )
-            
-            # Add convergence annotations
-            annotations = []
-            if history.get('mm_converged'):
-                annotations.append(dict(
-                    x=history['mm_iterations'],
-                    y=mm_times[-1] if mm_time_data else 0,
-                    text=f"MM Converged ✓<br>{mm_times[-1]:.3f}s",
-                    showarrow=True,
-                    arrowhead=2,
-                    ax=0,
-                    ay=-40,
-                    bgcolor="rgba(67, 97, 238, 0.8)",
-                    font=dict(color="white", size=10)
-                ))
-            
-            if history.get('ms_converged'):
-                total_iters = history['mm_iterations'] + history['ms_iterations']
-                annotations.append(dict(
-                    x=total_iters,
-                    y=ms_times[-1] if ms_time_data else 0,
-                    text=f"MS Converged ✓<br>{history['total_time']:.3f}s total",
-                    showarrow=True,
-                    arrowhead=2,
-                    ax=0,
-                    ay=-40,
-                    bgcolor="rgba(247, 37, 133, 0.8)",
-                    font=dict(color="white", size=10)
-                ))
-            
-            time_fig.update_layout(
-                xaxis_title="Iteration",
-                yaxis_title="Cumulative Time (seconds)",
-                hovermode='x unified',
-                plot_bgcolor='white',
-                paper_bgcolor='white',
-                font=dict(family="Poppins, sans-serif"),
-                margin=dict(l=50, r=20, t=20, b=40),
-                showlegend=True,
-                legend=dict(
-                    orientation="h",
-                    yanchor="bottom",
-                    y=1.02,
-                    xanchor="right",
-                    x=1
-                ),
-                annotations=annotations
-            )
-            time_fig.update_xaxes(showgrid=True, gridcolor='#f0f0f0')
-            time_fig.update_yaxes(showgrid=True, gridcolor='#f0f0f0')
-        else:
-            time_fig = go.Figure()
-            time_fig.add_annotation(
-                text="Execution time tracking data not available",
-                xref="paper", yref="paper",
-                x=0.5, y=0.5, showarrow=False
-            )
+            return {'display': 'none'}, graph_summary, error_message, empty_fig, None, None, [], [], []
         
         # Get communities
         try:
@@ -1319,7 +1067,7 @@ def run_bimlpa(n_clicks, contents, filename, threshold,
                     html.Hr(),
                     html.P("Coba ubah parameter threshold atau periksa struktur data.", className="mb-0")
                 ], color="warning")
-                return {'display': 'none'}, graph_summary, runtime_display, mod_fig, time_fig, warning_message, empty_fig, None, None, [], [], []
+                return {'display': 'none'}, graph_summary, warning_message, empty_fig, None, None, [], [], []
             
         except Exception as e:
             empty_fig = go.Figure()
@@ -1327,7 +1075,7 @@ def run_bimlpa(n_clicks, contents, filename, threshold,
                 html.H5("Error Saat Mengekstrak Komunitas", className="alert-heading"),
                 html.P(f"Error: {str(e)}"),
             ], color="danger")
-            return {'display': 'none'}, graph_summary, runtime_display, mod_fig, time_fig, error_message, empty_fig, None, None, [], [], []
+            return {'display': 'none'}, graph_summary, error_message, empty_fig, None, None, [], [], []
         
         # SIMPLIFIED COMMUNITY CARDS - Only use one approach
         communities_sorted = sorted(communities, key=len, reverse=True)
@@ -1504,9 +1252,10 @@ def run_bimlpa(n_clicks, contents, filename, threshold,
         # Create dropdown options for community selector
         community_dropdown_options = [{'label': f'Komunitas {i}', 'value': i} for i in range(1, len(communities_sorted) + 1)]
         
-        return {'display': 'block'}, graph_summary, runtime_display, mod_fig, time_fig, communities_output, fig, warnings_display, modularity_output, table_data, table_columns, community_dropdown_options
+        return {'display': 'block'}, graph_summary, communities_output, fig, warnings_display, modularity_output, table_data, table_columns, community_dropdown_options
     
     except Exception as e:
+        # Handle unexpected errors
         empty_fig = go.Figure()
         error_message = dbc.Alert([
             html.H5("Error Tidak Terduga", className="alert-heading"),
@@ -1531,7 +1280,7 @@ def run_bimlpa(n_clicks, contents, filename, threshold,
             except:
                 pass
         
-        return {'display': 'none'}, error_message, None, empty_fig, empty_fig, None, empty_fig, None, None, [], [], []
+        return {'display': 'none'}, error_message, None, empty_fig, None, None, [], [], []
 
 @app.callback(
     Output('download-data', 'data'),
