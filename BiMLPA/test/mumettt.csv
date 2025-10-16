@@ -1,0 +1,14 @@
+Drug,Gene
+Metformin,ABCB1
+Metformin,CYP3A4
+Metformin,INS
+Glyburide,ABCB1
+Glyburide,CYP3A4
+Glyburide,INS
+Glyburide,PPARG
+Pioglitazone,PPARG
+Pioglitazone,NR1I2
+Pioglitazone,PRKAA1
+Rosiglitazone,PPARG
+Rosiglitazone,NR1I2
+Rosiglitazone,PRKAA1
