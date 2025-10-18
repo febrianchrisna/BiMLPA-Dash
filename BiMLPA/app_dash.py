@@ -499,15 +499,6 @@ def get_layout():
                         "Parameter"
                     ], className="fw-bold"),
                     dbc.CardBody([
-                        html.Label("Maks iterasi", className="form-label"),
-                        dcc.Slider(
-                            id='max-iters-slider',
-                            min=1, max=200, step=1, value=50,
-                            marks={1: '1', 50: '50', 100: '100', 200: '200'},
-                            tooltip={"placement": "bottom", "always_visible": True},
-                            className="mb-4"
-                        ),
-                        
                         html.Label("Threshold (BiMLPA)", className="form-label"),
                         dcc.Slider(
                             id='threshold-slider',
@@ -882,7 +873,6 @@ def update_visualization_mode(viz_mode, selected_community, limit_nodes, max_nod
     [Input('run-button', 'n_clicks')],
     [State('upload-data', 'contents'),
      State('upload-data', 'filename'),
-     State('max-iters-slider', 'value'),
      State('threshold-slider', 'value'),
      State('max-prop-input', 'value'),
      State('max-mm-input', 'value'),
@@ -899,7 +889,7 @@ def update_visualization_mode(viz_mode, selected_community, limit_nodes, max_nod
         (Output('results-container', 'className'), 'loading', '')
     ]
 )
-def run_bimlpa(n_clicks, contents, filename, max_iters, threshold, 
+def run_bimlpa(n_clicks, contents, filename, threshold, 
                max_prop, max_mm, max_ms, max_nodes_per_side, show_labels, node_size, limit_nodes):
     if n_clicks is None or contents is None:
         empty_fig = go.Figure()
