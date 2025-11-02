@@ -15,7 +15,7 @@ import pandas as pd
 import numpy as np
 
 from bimlpa import BiMLPA_SqrtDeg, _labels_to_partition
-from modularity import calculate_murata_modularity
+from modularity import suzuki_modularity
 
 # Initialize the Dash app with a modern theme
 app = dash.Dash(__name__, 
@@ -1171,12 +1171,12 @@ def run_bimlpa(n_clicks, contents, filename, threshold,
                 for node in comm:
                     community_mapping[node] = idx
             
-            qm = calculate_murata_modularity(G, community_mapping)
+            qm = suzuki_modularity(G)
             
             modularity_output = dbc.Row([
                 dbc.Col([
                     html.H5(f"{qm:.4f}", className="text-center"),
-                    html.P("Murata Modularity", className="text-center text-muted")
+                    html.P("Suzuki Modularity", className="text-center text-muted")
                 ], width=12)
             ])
         except Exception as e:
